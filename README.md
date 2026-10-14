@@ -63,6 +63,12 @@ app/src/main/java/com/example/appname/
   - Lista con dos botones de acción: `[X]` (Eliminar directo) y `[E]` (Editar post en Pantalla 3).
   - Pantalla 3 (`EditPost`) con formulario de edición y actualización en BD.
   - Contador reactivo `TOTAL: X` persistido en `SharedPreferences`.
+- **`PostManagerLoginCase/`**: Variante del simulacro con flujo completo de **Autenticación / Inicio de Sesión**:
+  - Pantalla `LoginPost` con campos de usuario y contraseña (`PasswordVisualTransformation`).
+  - Persistencia de sesión en `SharedPreferences` (`is_logged`, `username`).
+  - Redirección con limpieza de pila (`popUpTo`) evitando regresar al login con el botón Atrás.
+  - Arranque dinámico según estado de sesión (`startDestination = if (isUserLoggedIn) "FindPost" else "LoginPost"`).
+  - Botón de `Cerrar Sesión` para limpiar credenciales y volver al login.
 
 ### 2. Guías y Documentación de Estudio
 - **[Guia presuntamente maestra.md](Guia%20presuntamente%20maestra.md)**: Manual integral con código genérico reutilizable (Ctrl+F), bloques modulares de UI, explicación paso a paso de cada capa y la **Sección 11 de Solución de Errores y Trampas de Examen (Gradle JDK, SQLite, Scroll, etc.)**.
