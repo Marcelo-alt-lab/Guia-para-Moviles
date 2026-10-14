@@ -24,6 +24,7 @@
    - [Pantalla 2 (Centro de la Pizarra): views/FavoriteListView.kt](#pantalla-2-centro-de-la-pizarra-viewsfavoritelistviewkt)
    - [Pantalla 3 (Derecha de la Pizarra): views/EditItemView.kt](#pantalla-3-derecha-de-la-pizarra-viewsedititemviewkt)
    - [Pantalla Opcional: views/HomeView.kt (Si te piden Menú Lateral / Drawer)](#pantalla-opcional-viewshomeviewkt-si-te-piden-menú-lateral--drawer)
+   - [Pantalla Opcional: views/LoginView.kt (Si te piden Inicio de Sesión con SharedPreferences)](#pantalla-opcional-viewsloginviewkt-si-te-piden-inicio-de-sesión-con-sharedpreferences)
 9. [9. Navegación y MainActivity.kt](#9-navegación-y-mainactivitykt)
    - [A. views/nav/AppNavigation.kt](#a-viewsnavappnavigationkt)
    - [B. MainActivity.kt](#b-mainactivitykt)
@@ -49,8 +50,9 @@ com.example.appname
     ├── SearchView.kt        -> (Pantalla 1 Pizarra) Consulta API + Selector + Guardar en SQLite
     ├── FavoriteListView.kt  -> (Pantalla 2 Pizarra) Lista SQLite + Eliminar (X) + Ir a Editar (E) + SharedPreferences
     ├── EditItemView.kt      -> (Pantalla 3 Pizarra) Formulario con 3+ cajas de texto + Botón "EDITAR"
+    ├── LoginView.kt         -> (Opcional) Pantalla de Login con persistencia en SharedPreferences
     └── nav/ 
-        └── AppNavigation.kt -> NavHost (Rutas: "home", "search", "list", "edit")
+        └── AppNavigation.kt -> NavHost (Rutas: "login", "home", "search", "list", "edit")
 ```
 
 ---
@@ -396,6 +398,44 @@ class MainViewModel : ViewModel() {
         totalCount = prefs.getInt("total_count", 0)
         totalAmount = prefs.getFloat("total_amount", 0.0f).toDouble()
         totalTax = prefs.getFloat("total_tax", 0.0f).toDouble()
+    }
+
+    // --- F. (OPCIONAL) GESTIÓN DE SESIÓN CON SHARED PREFERENCES ---
+    var loggedUser: String by mutableStateOf("")
+
+    // Verifica si ya hay una sesión activa al abrir la app
+    fun isUserLoggedIn(context: Context): Boolean {
+        val prefs = context.getSharedPreferences("UserSession", Context.MODE_PRIVATE)
+        val isLogged = prefs.getBoolean("is_logged", false)
+        if (isLogged) {
+            loggedUser = prefs.getString("username", "") ?: ""
+        }
+        return isLogged
+    }
+
+    // Guarda la sesión en SharedPreferences
+    fun loginUser(context: Context, user: String, pass: String): Boolean {
+        if (user.isNotBlank() && pass.isNotBlank()) {
+            val prefs = context.getSharedPreferences("UserSession", Context.MODE_PRIVATE)
+            prefs.edit().apply {
+                putBoolean("is_logged", true)
+                putString("username", user)
+                apply()
+            }
+            loggedUser = user
+            return true
+        }
+        return false
+    }
+
+    // Cierra y borra la sesión de SharedPreferences
+    fun logoutUser(context: Context) {
+        val prefs = context.getSharedPreferences("UserSession", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            clear()
+            apply()
+        }
+        loggedUser = ""
     }
 }
 ```
@@ -966,13 +1006,126 @@ fun HomeView(viewModel: MainViewModel, context: Context, nav: NavHostController)
 }
 ```
 
+### Pantalla Opcional: views/LoginView.kt (Si te piden Inicio de Sesión con SharedPreferences)
+
+Permite autenticar un usuario, guardar su estado de sesión en `SharedPreferences` para que no tenga que volver a iniciar sesión si cierra y vuelve a abrir la app, y redirigir a la pantalla principal limpiando el stack (`popUpTo`) para que el botón "Atrás" de Android no lo devuelva al login.
+
+```kotlin
+package com.example.appname.views
+
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.navigation.NavHostController
+import com.example.appname.viewmodel.MainViewModel
+
+@Composable
+fun LoginView(viewModel: MainViewModel, context: Context, nav: NavHostController) {
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "Iniciar Sesión",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        OutlinedTextField(
+            value = username,
+            onValueChange = { username = it },
+            label = { Text("Usuario o Correo") },
+            leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it },
+            label = { Text("Contraseña") },
+            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Button(
+            onClick = {
+                if (username.isNotBlank() && password.isNotBlank()) {
+                    // Guarda la sesión en SharedPreferences (XML)
+                    viewModel.loginUser(context, username)
+                    Toast.makeText(context, "Bienvenido, $username", Toast.LENGTH_SHORT).show()
+
+                    // Navega a la pantalla de búsqueda y saca 'login' de la pila
+                    nav.navigate("search") {
+                        popUpTo("login") { inclusive = true }
+                    }
+                } else {
+                    Toast.makeText(context, "Por favor complete todos los campos", Toast.LENGTH_SHORT).show()
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("INGRESAR")
+        }
+    }
+}
+```
+
+#### Botón de Cerrar Sesión (Snippet para colocar en HomeView o Drawer)
+Si el profesor pide opción de "Cerrar Sesión" (Logout):
+```kotlin
+Button(
+    onClick = {
+        viewModel.logoutUser(context)
+        Toast.makeText(context, "Sesión cerrada", Toast.LENGTH_SHORT).show()
+        nav.navigate("login") {
+            popUpTo(0) { inclusive = true } // Limpia toda la pila de navegación
+        }
+    },
+    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+    modifier = Modifier.fillMaxWidth()
+) {
+    Text("Cerrar Sesión")
+}
+```
+
 ---
 
 ## 9. Navegación y MainActivity.kt
 
 ### A. views/nav/AppNavigation.kt
 
-> **Tip:** Si el examen no pide pantalla Home y arranca directo en el buscador (como en la pizarra), cambia `startDestination = "home"` por `startDestination = "search"`.
+> **Tip:**
+> - Si piden **Inicio de Sesión**: usa `startDestination = if (viewModel.isUserLoggedIn(context)) "search" else "login"`.
+> - Si no piden Login y arranca directo en la consulta (como en la pizarra): usa `startDestination = "search"`.
 
 ```kotlin
 package com.example.appname.views.nav
@@ -986,13 +1139,19 @@ import com.example.appname.viewmodel.MainViewModel
 import com.example.appname.views.EditItemView
 import com.example.appname.views.FavoriteListView
 import com.example.appname.views.HomeView
+import com.example.appname.views.LoginView
 import com.example.appname.views.SearchView
 
 @Composable
 fun AppNavigation(viewModel: MainViewModel, context: Context) {
     val navController = rememberNavController()
 
-    NavHost(navController = navController, startDestination = "search") {
+    // Si tu examen pide Login con persistencia en SharedPreferences:
+    // val startRoute = if (viewModel.isUserLoggedIn(context)) "search" else "login"
+    val startRoute = "search" // o "login" si se evalúa sesión
+
+    NavHost(navController = navController, startDestination = startRoute) {
+        composable("login") { LoginView(viewModel, context, navController) }
         composable("home") { HomeView(viewModel, context, navController) }
         composable("search") { SearchView(viewModel, context, navController) }
         composable("list") { FavoriteListView(viewModel, context, navController) }
