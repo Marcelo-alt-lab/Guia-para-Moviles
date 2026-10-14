@@ -30,6 +30,10 @@
    - [B. MainActivity.kt](#b-mainactivitykt)
 10. [10. Resumen Rápido de Cambios el Día del Examen](#10-resumen-rápido-de-cambios-el-día-del-examen)
 11. [11. Guía de Solución de Errores y Trampas de Examen (Troubleshooting)](#11-guía-de-solución-de-errores-y-trampas-de-examen-troubleshooting)
+12. [12. Segmento Especial: JSONs Complejos (Wrappers {"data": [...]} y Objetos Anidados)](#12-segmento-especial-jsons-complejos-wrappers-data--y-objetos-anidados)
+   - [A. Caso 1: Objeto Envoltorio / Wrapper ({ "data": [ ... ] })](#a-caso-1-objeto-envoltorio--wrapper--data---)
+   - [B. Caso 2: Objetos Anidados en el mismo registro (Ej: street: { ... })](#b-caso-2-objetos-anidados-en-el-mismo-registro-ej-street---)
+   - [C. Tabla Comparativa Mnemotécnica](#c-tabla-comparativa-mnemotécnica)
 
 ---
 
@@ -1266,3 +1270,218 @@ class MainActivity : ComponentActivity() {
       viewModel.loadPosts(context)
   }
   ```
+
+
+---
+
+## 12. Segmento Especial: JSONs Complejos (Wrappers {"data": [...]} y Objetos Anidados)
+
+> 🧠 **Regla de Oro:**
+> - Cada par de llaves `{ }` en el JSON representa una **`data class` independiente** en Kotlin.
+> - Cada par de corchetes `[ ]` representa una lista: **`List<TuClase>`**.
+
+---
+
+### A. Caso 1: Objeto Envoltorio / Wrapper ({ "data": [ ... ] })
+
+Ocurre cuando la API no devuelve una lista directa `[ ... ]`, sino un objeto raíz que contiene una propiedad (comúnmente `"data"`, `"results"`, `"items"` o `"songs"`) con el array de elementos adentro:
+
+```json
+{
+  "data": [
+    {
+      "id": "1",
+      "name": "Espresso",
+      "artists": "Sabrina Carpenter",
+      "isExplicit": true,
+      "durationMs": 175459,
+      "albumName": "Espresso",
+      "albumReleaseDate": "2024-04-12"
+    }
+  ]
+}
+```
+
+> ⚠️ **Peligro en el examen:** Si declaras `Response<List<SongBean>>` en tu WebService, la aplicación crasheará en runtime con:  
+> `JsonSyntaxException: Expected BEGIN_ARRAY but was BEGIN_OBJECT`.
+
+#### Paso 1: En `model/beans/SongBean.kt` (Crear el Bean individual Y el Envoltorio)
+
+```kotlin
+package com.example.appname.model.beans
+
+// 1. Representa cada registro individual dentro del array
+data class SongBean(
+    val id: String = "",
+    val name: String = "",
+    val artists: String = "",
+    val isExplicit: Boolean = false,
+    val durationMs: Long = 0L,
+    val albumName: String = "",
+    val albumReleaseDate: String = ""
+)
+
+// 2. Representa el objeto raíz exterior. El nombre del atributo DEBE coincidir con la clave del JSON ("data")
+data class SongResponse(
+    val data: List<SongBean> = emptyList()
+)
+```
+
+#### Paso 2: En `model/response/WebService.kt` (Pedir el Envoltorio)
+
+```kotlin
+package com.example.appname.model.response
+
+import com.example.appname.model.beans.SongResponse
+import retrofit2.Response
+import retrofit2.http.GET
+
+interface WebService {
+    @GET("songs")
+    suspend fun getSongs(): Response<SongResponse> // <-- Se solicita SongResponse, NO List<SongBean>
+}
+```
+
+#### Paso 3: En `viewmodel/MainViewModel.kt` (Extraer la lista interna)
+
+```kotlin
+var songList: List<SongBean> by mutableStateOf(emptyList())
+
+suspend fun fetchSongs() {
+    val response = RetrofitClient.webService.getSongs()
+    if (response.isSuccessful && response.body() != null) {
+        // response.body() es SongResponse -> extraemos su lista con .data
+        songList = response.body()!!.data
+    }
+}
+```
+
+> 💡 **Nota sobre SQLite:** La base de datos local SQLite solo guarda y lee la lista de `SongBean`. La clase `SongResponse` solo existe para recibir la respuesta HTTP de Retrofit.
+
+---
+
+### B. Caso 2: Objetos Anidados en el mismo registro (Ej: street: { ... })
+
+Ocurre cuando un registro tiene dentro otro objeto con sub-propiedades:
+
+```json
+{
+  "id": 1,
+  "name": "Juan Perez",
+  "street": {
+    "Adress": "Jr. Arequipa",
+    "street": "341"
+  }
+}
+```
+
+#### Paso 1: En `model/beans/UserBean.kt` (Declarar la jerarquía de Data Classes)
+
+```kotlin
+package com.example.appname.model.beans
+
+// Sub-clase para el objeto anidado
+data class StreetBean(
+    val Adress: String = "",
+    val street: String = ""
+)
+
+// Clase principal que contiene a la sub-clase
+data class UserBean(
+    val id: Int = 0,
+    val name: String = "",
+    val street: StreetBean = StreetBean() // <-- Objeto anidado como propiedad
+)
+```
+
+#### Paso 2: En Jetpack Compose (Cómo mostrarlo en la UI)
+
+Se accede mediante navegación con punto común y corriente:
+
+```kotlin
+Text(text = "Nombre: ${user.name}")
+Text(text = "Dirección: ${user.street.Adress} N° ${user.street.street}")
+```
+
+#### Paso 3: En SQLite (`model/db/OpenHelper.kt`) (Aplanamiento a Columnas Primitivas)
+
+> 📌 **Regla SQLite:** SQLite no almacena objetos anidados. La tabla debe "aplanar" el objeto convirtiendo cada campo anidado en una columna de tipo `TEXT` o `INTEGER`.
+
+```kotlin
+package com.example.appname.model.db
+
+import android.content.ContentValues
+import android.content.Context
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
+import com.example.appname.model.beans.StreetBean
+import com.example.appname.model.beans.UserBean
+
+class OpenHelper(context: Context) : SQLiteOpenHelper(context, "UserDB.db", null, 1) {
+
+    override fun onCreate(db: SQLiteDatabase) {
+        // 1. Columnas separadas para address y street_number
+        db.execSQL("""
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                name TEXT,
+                address TEXT,
+                street_number TEXT
+            )
+        """.trimIndent())
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        db.execSQL("DROP TABLE IF EXISTS users")
+        onCreate(db)
+    }
+
+    // 2. INSERT / GUARDAR: Desglosamos user.street en los ContentValues
+    fun insertUser(user: UserBean) {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put("id", user.id)
+            put("name", user.name)
+            put("address", user.street.Adress)
+            put("street_number", user.street.street)
+        }
+        db.insertWithOnConflict("users", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        db.close()
+    }
+
+    // 3. READ / LEER: Reconstruimos el StreetBean desde las columnas
+    fun readAllUsers(): MutableList<UserBean> {
+        val list = mutableListOf<UserBean>()
+        val db = readableDatabase
+        val cursor = db.rawQuery("SELECT * FROM users", null)
+
+        if (cursor.moveToFirst()) {
+            do {
+                val address = cursor.getString(cursor.getColumnIndexOrThrow("address"))
+                val streetNum = cursor.getString(cursor.getColumnIndexOrThrow("street_number"))
+
+                val user = UserBean(
+                    id = cursor.getInt(cursor.getColumnIndexOrThrow("id")),
+                    name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
+                    street = StreetBean(Adress = address, street = streetNum) // <-- Reconstrucción
+                )
+                list.add(user)
+            } while (cursor.moveToNext())
+        }
+        cursor.close()
+        db.close()
+        return list
+    }
+}
+```
+
+---
+
+### C. Tabla Comparativa Mnemotécnica
+
+| Formato del JSON en la API | Tipo en Retrofit (`WebService.kt`) | En `MainViewModel` |
+| :--- | :--- | :--- |
+| `[ { ... }, { ... } ]` *(Array directo en la raíz)* | `Response<List<MiBean>>` | `itemList = response.body()!!` |
+| `{ "id": 1, "title": "..." }` *(Objeto directo único)* | `Response<MiBean>` | `item = response.body()!!` |
+| `{ "data": [ { ... } ] }` *(Objeto Wrapper con array)* | `Response<MiResponseWrapper>` | `itemList = response.body()!!.data` |
+| `{ "id": 1, "sub": { "x": 10 } }` *(Objeto con hijo anidado)* | `Response<MiBean>` *(con `SubBean` adentro)* | `item = response.body()!!` *(y en UI: `item.sub.x`)* |
